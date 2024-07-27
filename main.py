@@ -5,7 +5,7 @@ import json
 from sklearn.preprocessing import OneHotEncoder, LabelEncoder
 
 # loading the saved model
-# loaded_model = pickle.load(open('./Model/RF_model.pkl', 'rb'))
+loaded_model = pickle.load(open('./Model/RF_model.pkl', 'rb'))
 
 # Load categories from the JSON file
 with open('categories.json', 'r') as f:
