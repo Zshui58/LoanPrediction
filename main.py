@@ -1,11 +1,15 @@
 import streamlit as st
 import pickle
+import pandas as pd
 import numpy as np
 import json
-from sklearn.preprocessing import OneHotEncoder, LabelEncoder
+from sklearn.preprocessing import OneHotEncoder, LabelEncoder, StandardScaler
 
 # loading the saved model
 loaded_model = pickle.load(open('./Model/RF_model.pkl', 'rb'))
+
+with open('./Model/scaler.pkl', 'rb') as f:
+    scaler = pickle.load(f)
 
 # Load categories from the JSON file
 with open('categories.json', 'r') as f:
@@ -21,71 +25,79 @@ profession_encoder.fit(categories['profession'])
 city_encoder.fit(categories['city'])
 state_encoder.fit(categories['state'])
 
-# Define the categorical options globally
-marriedsingle = ['Married', 'Single']
-house = ['No rent,No own', 'Own', 'Rent']
-car = ['No car', 'Yes, have car']
+# Function to make predictions
+def make_prediction(input_data):
 
-# Function to determine loan eligibility
-def determine_eligibility(annual_income, age, experience, profession, city, state, current_job_yrs, current_house_yrs, maritalStatus, houseOwnership, carOwnership):
-    # Label encode the categorical features
+    # Convert input data to DataFrame
+    input_df = pd.DataFrame([input_data])
+
+    # Scale the numerical features using the previously fitted scaler
+    scaled_input = scaler.transform(input_df[['income', 'age', 'experience', 'current_house_yrs']])
+
+    # Convert the scaled values back to a DataFrame
+    scaled_input_df = pd.DataFrame(scaled_input, columns=['income', 'age', 'experience', 'current_house_yrs'])
+
+    # Update the input dataframe with scaled numerical data
+    input_df.update(scaled_input_df)
+
+    # Make prediction with the model
+    prediction = loaded_model.predict(input_df)
+
+    return prediction[0]
+
+# Streamlit app
+def main():
+    st.title("Loan Eligibility Prediction")
+
+    # Collect user input
+    income = st.number_input("Annual Income ($)", min_value=0, step=1000)
+    age = st.number_input("Age", min_value=0, max_value=100)
+    experience = st.number_input("Experience (years)", min_value=0, max_value=100)
+    marital_status = st.selectbox("Marital Status", ["Married", "Single"])
+    car_ownership = st.selectbox("Car Ownership", ["Yes", "No"])
+    profession = st.selectbox("Profession:", categories['profession'])
+    city = st.selectbox("City:", categories['city'])
+    state = st.selectbox("State:", categories['state'])
+    current_house_yrs = st.number_input("Current House Years", min_value=0, max_value=100)
+    house_ownership = st.selectbox("House Ownership", ["No rent, No own", "Owned", "Rented"])
+
+    # Encode categorical features using LabelEncoder
     profession_encoded = profession_encoder.transform([profession])[0]
     city_encoded = city_encoder.transform([city])[0]
     state_encoded = state_encoder.transform([state])[0]
 
-    # Combine the input data into a single array
-    input_data = [annual_income, age, experience, profession_encoded, city_encoded, state_encoded, current_job_yrs, current_house_yrs]
+    # Map categorical input to their encoded values
+    marital_status_encoded = 1 if marital_status == "Married" else 0
+    car_ownership_encoded = 1 if car_ownership == "Yes" else 0
 
-    # Encode categorical features
-    married_single_encoded = [1, 0] if maritalStatus == 'Married' else [0, 1]
-    car_ownership_encoded = [1, 0] if carOwnership == 'Yes, have car' else [0, 1]
-    house_ownership_encoded = [1, 0, 0] if houseOwnership == 'No rent, No own' else [0, 1, 0] if houseOwnership == 'Own' else [0, 0, 1]
+    # One-hot encode the house ownership
+    house_ownership_encoded = {
+        "house_ownership_norent_noown": 1 if house_ownership == "No rent, No own" else 0,
+        "house_ownership_owned": 1 if house_ownership == "Owned" else 0,
+        "house_ownership_rented": 1 if house_ownership == "Rented" else 0,
+    }
 
-    # Combine all features
-    input_data_combined = input_data + married_single_encoded + car_ownership_encoded + house_ownership_encoded
+    # Create input data dictionary
+    input_data = {
+        'income': income,
+        'age': age,
+        'experience': experience,
+        'married/single': marital_status_encoded,
+        'car_ownership': car_ownership_encoded,
+        'profession': profession_encoded,
+        'city': city_encoded,
+        'state': state_encoded,
+        'current_house_yrs': current_house_yrs,
+        **house_ownership_encoded
+    }
 
-    # Ensure the input data has the correct shape
-    input_data_as_numpy_array = np.asarray(input_data_combined).reshape(1, -1)
-
-    # Make a prediction
-    prediction = loaded_model.predict(input_data_as_numpy_array)
-    print(prediction)
-
-    if prediction[0] == 0:
-        return 'The person gets the loan'
-    else:
-        return 'The person fails to get the loan'
-
-
-# Streamlit application
-def main():
-
-    st.title("Loan Eligibility Checker")
-
-    # Collecting user input
-    st.header("Please enter your details:")
-    annual_income = st.number_input("Annual Income ($)", min_value=0, step=1000)
-    age = st.number_input("Age:", min_value=17, max_value=80)
-    experience = st.number_input("Experience in work:")
-    profession = st.selectbox("Profession:", categories['profession'])
-    city = st.selectbox("City:", categories['city'])
-    state = st.selectbox("State:", categories['state'])
-    current_job_yrs = st.number_input("Current Job Years:")
-    current_house_yrs = st.number_input("Current House Years:")
-    maritalStatus = st.selectbox("Select Marital Status:", marriedsingle, index=0)
-    houseOwnership = st.selectbox("Select House Ownership:", house, index=0)
-    carOwnership = st.selectbox("Select Car Ownership:", car, index=0)
-
-    # Code for Prediction
-    eligibility_status = ''
-
-    # Determine eligibility when the button is clicked
-    if st.button("Check Eligibility"):
-        eligibility_status = determine_eligibility(annual_income, age, experience, profession, city, state, current_job_yrs, current_house_yrs, maritalStatus, houseOwnership, carOwnership)
-        st.subheader("Loan Eligibility Status:")
-        st.write(eligibility_status)
-
+    # Predict when the button is clicked
+    if st.button("Predict Loan Eligibility"):
+        prediction = make_prediction(input_data)
+        if prediction == 0:
+            st.success("The person is eligible for the loan.")
+        else:
+            st.error("The person is not eligible for the loan.")
 
 if __name__ == "__main__":
     main()
-
